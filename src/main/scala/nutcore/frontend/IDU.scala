@@ -29,6 +29,7 @@ class Decoder(implicit val p: NutCoreConfig) extends NutCoreModule with HasInstr
     val out = Decoupled(new DecodeIO)
     val isWFI = Output(Bool()) // require NutCoreSim to advance mtime when wfi to reduce the idle time in Linux
     val isBranch = Output(Bool())
+    val is_br    = Output(Bool())
   })
 
   val hasIntr = Wire(Bool())
@@ -186,6 +187,7 @@ class Decoder(implicit val p: NutCoreConfig) extends NutCoreModule with HasInstr
   io.out.bits.ctrl.isNutCoreTrap := (instr === NutCoreTrap.TRAP) && io.in.valid
   io.isWFI := (instr === Priviledged.WFI) && io.in.valid
   io.isBranch := VecInit(RV32I_BRUInstr.table.map(i => i._2.tail(1) === fuOpType)).asUInt.orR && fuType === FuType.bru
+  io.is_br := (fuOpType =/= ALUOpType.jalr) && (fuOpType =/= ALUOpType.jal) && (fuType === FuType.bru)
 
 }
 
@@ -196,6 +198,7 @@ class IDU(implicit val p: NutCoreConfig) extends NutCoreModule with HasInstrType
   })
   val decoder1  = Module(new Decoder)
   val decoder2  = Module(new Decoder)
+
   io.in(0) <> decoder1.io.in
   io.in(1) <> decoder2.io.in
   io.out(0) <> decoder1.io.out

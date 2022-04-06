@@ -177,4 +177,11 @@ class ALU(hasBru: Boolean = false) extends NutCoreModule {
     BoringUtils.addSource(right && func === ALUOpType.ret, "MbpRRight")
     BoringUtils.addSource(wrong && func === ALUOpType.ret, "MbpRWrong")
   }
+  // when(valid && isBranch && isBru){
+  //   printf("----------------\n")
+  //   printf("pc: %x\n",io.cfIn.pc)
+  //   printf("instr: %x\n",io.cfIn.instr)
+  //   printf("predictright: %x\n",!predictWrong)
+  //   printf("----------------\n")
+  // }
 }
