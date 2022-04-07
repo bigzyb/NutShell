@@ -542,8 +542,9 @@ class BPU_inorder extends NutCoreModule {
   // PHT
 
 
-  val pht = Mem(NRbtb, UInt(2.W))
-  val phtTaken = RegEnable(pht.read(ghr ^ btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
+//  val pht = Mem(NRbtb, UInt(2.W))
+  val pht = RegInit(VecInit(Seq.fill(NRbtb)(0.U(2.W))))
+  val phtTaken = RegEnable(pht(ghr ^ btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
   // val phtTaken = RegEnable(pht.read(ghrindex_commit ^ btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
 
   // val sel = Mem(128,UInt(2.W))
@@ -597,14 +598,15 @@ class BPU_inorder extends NutCoreModule {
   btb.io.w.req.bits.data := btbWrite
 
 
-  val cnt = RegNext(pht.read(ghr_commit ^ btbAddr.getIdx(req.pc)))
+  val cnt = RegNext(pht(ghr_commit ^ btbAddr.getIdx(req.pc)))
   val reqLatch = RegNext(req)
   when (reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
     val taken = reqLatch.actualTaken
     val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
     val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
     when (wen) {
-      pht.write(ghr_commit ^ btbAddr.getIdx(reqLatch.pc), newCnt)
+//      pht.write(ghr_commit ^ btbAddr.getIdx(reqLatch.pc), newCnt)
+      pht(ghr_commit ^ btbAddr.getIdx(reqLatch.pc)) := newCnt
       //Debug(){
         //Debug("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
       //}

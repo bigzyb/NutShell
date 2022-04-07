@@ -99,15 +99,17 @@ class NaiveRVCAlignBuffer extends NutCoreModule with HasInstrType with HasExcept
   val tem_brdata1 = Cat(instr(14,12),instr(6,0))
   val tem_brdata2 = Cat(instr(15,14),instr(1,0))
 
-  io.is_br :=  (tem_brdata1 === pre_type.beq) ||
+  io.is_br :=  (!isRVC && ((tem_brdata1 === pre_type.beq) ||
       (tem_brdata1 === pre_type.bne) ||
       (tem_brdata1 === pre_type.blt) ||
       (tem_brdata1 === pre_type.bge) ||
       (tem_brdata1 === pre_type.bltu) ||
-      (tem_brdata1 === pre_type.bgeu) ||
-      (tem_brdata2 === pre_type.beqz_bnez)
+      (tem_brdata1 === pre_type.bgeu))) ||
+      (isRVC && (tem_brdata2 === pre_type.beqz_bnez))
   BoringUtils.addSource(io.is_br,"is_br_predict")
-
+  when(io.is_br) {
+//    printf("instr : %x\n",instr)
+  }
 
   when(!io.flush){
     switch(state){
