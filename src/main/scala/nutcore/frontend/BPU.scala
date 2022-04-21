@@ -1,18 +1,18 @@
 /**************************************************************************************
-* Copyright (c) 2020 Institute of Computing Technology, CAS
-* Copyright (c) 2020 University of Chinese Academy of Sciences
-* 
-* NutShell is licensed under Mulan PSL v2.
-* You can use this software according to the terms and conditions of the Mulan PSL v2. 
-* You may obtain a copy of Mulan PSL v2 at:
-*             http://license.coscl.org.cn/MulanPSL2 
-* 
-* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER 
-* EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR 
-* FIT FOR A PARTICULAR PURPOSE.  
-*
-* See the Mulan PSL v2 for more details.  
-***************************************************************************************/
+ * Copyright (c) 2020 Institute of Computing Technology, CAS
+ * Copyright (c) 2020 University of Chinese Academy of Sciences
+ *
+ * NutShell is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *             http://license.coscl.org.cn/MulanPSL2
+ *
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR
+ * FIT FOR A PARTICULAR PURPOSE.
+ *
+ * See the Mulan PSL v2 for more details.
+ ***************************************************************************************/
 
 package nutcore
 
@@ -61,7 +61,7 @@ class BPUUpdateReq extends NutCoreBundle {
 class BPU_ooo extends NutCoreModule {
   val io = IO(new Bundle {
     val in = new Bundle { val pc = Flipped(Valid((UInt(VAddrBits.W)))) }
-    val out = new RedirectIO 
+    val out = new RedirectIO
     val flush = Input(Bool())
     val brIdx = Output(Vec(4, Bool()))
     // val target = Output(Vec(4, UInt(VAddrBits.W)))
@@ -108,7 +108,7 @@ class BPU_ooo extends NutCoreModule {
   io.crosslineJump := crosslineJump
   // val crosslineJumpLatch = RegNext(crosslineJump)
   // val crosslineJumpTarget = RegEnable(btbRead.target, crosslineJump)
-  
+
   // PHT
   val pht = List.fill(4)(Mem(NRbtb >> 2, UInt(2.W)))
   val phtTaken = Wire(Vec(4, Bool()))
@@ -129,7 +129,7 @@ class BPU_ooo extends NutCoreModule {
   btbWrite.target := req.actualTarget
   btbWrite._type := req.btbType
   btbWrite.crosslineJump := req.pc(2,1)==="h3".U && !req.isRVC // ((pc_offset % 8) == 6) && inst is 32bit in length
-  btbWrite.valid := true.B 
+  btbWrite.valid := true.B
   // NOTE: We only update BTB at a miss prediction.
   // If a miss prediction is found, the pipeline will be flushed
   // in the next cycle. Therefore it is safe to use single-port
@@ -156,12 +156,12 @@ class BPU_ooo extends NutCoreModule {
       ras.write(sp.value + 1.U, Mux(req.isRVC, req.pc + 2.U, req.pc + 4.U))
       sp.value := sp.value + 1.U
     }
-    .elsewhen (req.fuOpType === ALUOpType.ret) {
-      when(sp.value === 0.U) {
-        // RAS empty, do nothing
+      .elsewhen (req.fuOpType === ALUOpType.ret) {
+        when(sp.value === 0.U) {
+          // RAS empty, do nothing
+        }
+        sp.value := Mux(sp.value===0.U, 0.U, sp.value - 1.U)
       }
-      sp.value := Mux(sp.value===0.U, 0.U, sp.value - 1.U)
-    }
   }
 
   def genInstValid(pc: UInt) = LookupTree(pc(2,1), List(
@@ -262,9 +262,9 @@ class BPU_embedded extends NutCoreModule {
       ras.write(sp.value + 1.U, req.pc + 4.U)
       sp.value := sp.value + 1.U
     }
-    .elsewhen (req.fuOpType === ALUOpType.ret) {
-      sp.value := sp.value - 1.U
-    }
+      .elsewhen (req.fuOpType === ALUOpType.ret) {
+        sp.value := sp.value - 1.U
+      }
   }
 
   val flushBTB = WireInit(false.B)
@@ -293,10 +293,6 @@ class BPU_inorder extends NutCoreModule {
   //ghr
   val ghr = RegInit(0.U(24.W))
   val ghr_commit = RegInit(0.U(24.W))
-  // val ghrindex = Cat(ghr(15,12) ^ ghr(6,3),ghr(11,7))
-  // val ghrindex_commit = Cat(ghr_commit(15,12) ^ ghr_commit(6,3),ghr_commit(11,7))
-  // val ghrindex = ghr(11,3)
-  // val ghrindex_commit = ghr_commit(11,3)
 
   // BTB
   val NRbtb = 512
@@ -347,7 +343,7 @@ class BPU_inorder extends NutCoreModule {
 
 
   //  val pht = Mem(NRbtb, UInt(2.W))
-//  val pht = RegInit(VecInit(Seq.fill(NRbht)(2.U(2.W))))
+  //  val pht = RegInit(VecInit(Seq.fill(NRbht)(2.U(2.W))))
   val pht = Mem(NRbht, UInt(2.W))
   val pht_index = ghr(23,12) ^ ghr(11,0) ^ io.in.pc.bits(11,0)
   val phtTaken = RegEnable(pht(pht_index)(1), io.in.pc.valid)
@@ -390,6 +386,10 @@ class BPU_inorder extends NutCoreModule {
       //      pht.write(ghr_commit ^ btbAddr.getIdx(reqLatch.pc), newCnt)
       pht(RegNext(bht_index_commit)) := newCnt
 
+    }
+  }
+
+
   val is_br = WireInit(false.B)
   val pre_phtTaken = WireInit(false.B)
   BoringUtils.addSink(is_br,"is_br_predict")
@@ -423,36 +423,13 @@ class BPU_inorder extends NutCoreModule {
         sp.value := Mux(sp.value===0.U, 0.U, sp.value - 1.U) //TODO: sp.value may less than 0.U
       }
   }
-  // printf("ghr: %b \n",ghr)
-  // printf("ghr_commit: %b \n",ghr_commit)
 
   io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
-  // io.out.target := Mux(crosslineJumpLatch && !flush, crosslineJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
-  // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
+
   io.brIdx  := btbRead.brIdx & Cat(true.B, crosslineJump, Fill(2, io.out.valid))
   io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
   io.out.rtype := 0.U
-  // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump || crosslineJumpLatch && !flush && !crosslineJump
-  // Note:
-  // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump : normal branch predict
-  // crosslineJumpLatch && !flush && !crosslineJump : cross line branch predict, bpu will require imem to fetch the next 16bit of current inst in next instline
-  // `&& !crosslineJump` is used to make sure this logic will run correctly when imem stalls (pcUpdate === false)
-  // by using `instline`, we mean a 64 bit instfetch result from imem
-  // ROCKET uses a 32 bit instline, and its IDU logic is more simple than this implentation.
 
-  // io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
-  // // io.out.target := Mux(crosslineJumpLatch && !flush, crosslineJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
-  // // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
-  // io.brIdx  := btbRead.brIdx & Cat(true.B, crosslineJump, Fill(2, io.out.valid))
-  // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
-  // io.out.rtype := 0.U
-  // // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump || crosslineJumpLatch && !flush && !crosslineJump
-  // // Note:
-  // // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump : normal branch predict
-  // // crosslineJumpLatch && !flush && !crosslineJump : cross line branch predict, bpu will require imem to fetch the next 16bit of current inst in next instline
-  // // `&& !crosslineJump` is used to make sure this logic will run correctly when imem stalls (pcUpdate === false)
-  // // by using `instline`, we mean a 64 bit instfetch result from imem
-  // // ROCKET uses a 32 bit instline, and its IDU logic is more simple than this implentation.
 }
 
 class DummyPredicter extends NutCoreModule {
