@@ -154,7 +154,6 @@ class ALU(hasBru: Boolean = false) extends NutCoreModule {
   bpuUpdateReq.fuOpType := func
   bpuUpdateReq.btbType := LookupTree(func, RV32I_BRUInstr.bruFuncTobtbTypeTable)
   bpuUpdateReq.isRVC := isRVC
-  bpuUpdateReq.instr := io.cfIn.instr
 
   if(hasBru){
     BoringUtils.addSource(RegNext(bpuUpdateReq), "bpuUpdateReq")
@@ -178,11 +177,4 @@ class ALU(hasBru: Boolean = false) extends NutCoreModule {
     BoringUtils.addSource(right && func === ALUOpType.ret, "MbpRRight")
     BoringUtils.addSource(wrong && func === ALUOpType.ret, "MbpRWrong")
   }
-  // when(valid && isBranch && isBru){
-  //   printf("----------------\n")
-  //   printf("pc: %x\n",io.cfIn.pc)
-  //   printf("instr: %x\n",io.cfIn.instr)
-  //   printf("predictright: %x\n",!predictWrong)
-  //   printf("----------------\n")
-  // }
 }

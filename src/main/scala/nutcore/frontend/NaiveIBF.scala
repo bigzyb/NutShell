@@ -19,9 +19,19 @@ package nutcore
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.BoringUtils
-
 import utils._
-
+object pre_type {
+  def jal = BitPat("b1101111")
+  def beq = BitPat("b000_1100011")
+  def bne = BitPat("b001_1100011")
+  def blt = BitPat("b100_1100011")
+  def bge = BitPat("b101_1100011")
+  def bltu = BitPat("b110_1100011")
+  def bgeu = BitPat("b111_1100011")
+  def beqz_bnez = BitPat("b1101")
+  def j = BitPat("b10101")
+  def instr32 = BitPat("b11")
+}
 // 1-width Naive Instruction Align Buffer
 class NaiveRVCAlignBuffer extends NutCoreModule with HasInstrType with HasExceptionNO {
   val io = IO(new Bundle {
@@ -95,21 +105,20 @@ class NaiveRVCAlignBuffer extends NutCoreModule with HasInstrType with HasExcept
     "b110".U -> instIn(63+16,32+16)
   )))
 
-//instr predecode
   val tem_brdata1 = Cat(instr(14,12),instr(6,0))
-  val tem_brdata2 = Cat(instr(15,14),instr(1,0))
 
-  io.is_br :=  (!isRVC && ((tem_brdata1 === pre_type.beq) ||
-      (tem_brdata1 === pre_type.bne) ||
-      (tem_brdata1 === pre_type.blt) ||
-      (tem_brdata1 === pre_type.bge) ||
-      (tem_brdata1 === pre_type.bltu) ||
-      (tem_brdata1 === pre_type.bgeu))) ||
-      (isRVC && (tem_brdata2 === pre_type.beqz_bnez))
+  val pc_next = pcOut =/= RegNext(pcOut)
+  val is_br = (tem_brdata1 === pre_type.beq) ||
+    (tem_brdata1 === pre_type.bne) ||
+    (tem_brdata1 === pre_type.blt) ||
+    (tem_brdata1 === pre_type.bge) ||
+    (tem_brdata1 === pre_type.bltu) ||
+    (tem_brdata1 === pre_type.bgeu)
+  io.is_br := is_br && pc_next
+  
   BoringUtils.addSource(io.is_br,"is_br_predict")
-  when(io.is_br) {
-//    printf("instr : %x\n",instr)
-  }
+  BoringUtils.addSource(io.in.bits.phtTaken,"pre_phtTaken")
+
 
   when(!io.flush){
     switch(state){

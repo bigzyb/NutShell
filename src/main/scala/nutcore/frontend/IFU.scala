@@ -29,19 +29,6 @@ trait HasResetVector {
   val resetVector = Settings.getLong("ResetVector")
 }
 
-object pre_type {
-  def jal = BitPat("b1101111")
-  def beq = BitPat("b000_1100011")
-  def bne = BitPat("b001_1100011")
-  def blt = BitPat("b100_1100011")
-  def bge = BitPat("b101_1100011")
-  def bltu = BitPat("b110_1100011")
-  def bgeu = BitPat("b111_1100011")
-  def beqz_bnez = BitPat("b1101")
-  def j = BitPat("b10101")
-  def instr32 = BitPat("b11")
-}
-
 class ICacheUserBundle extends NutCoreBundle {
     val pc = UInt(VAddrBits.W)
     val brIdx = UInt(4.W) // mark if an inst is predicted to branch
@@ -403,19 +390,6 @@ class IFU_inorder extends NutCoreModule with HasResetVector {
   io.out.bits.exceptionVec(instrPageFault) := io.ipf
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
 
-  // val instr_ifu = io.imem.resp.bits.rdata
-  // val tem_brdata1 = Cat(instr_ifu(14,12),instr_ifu(6,0))
-  // val tem_brdata2 = Cat(instr_ifu(15,14),instr_ifu(1,0))
-
-  // bp1.io.is_br :=  (tem_brdata1 === pre_type.beq) ||
-  //     (tem_brdata1 === pre_type.bne) ||
-  //     (tem_brdata1 === pre_type.blt) ||
-  //     (tem_brdata1 === pre_type.bge) ||
-  //     (tem_brdata1 === pre_type.bltu) ||
-  //     (tem_brdata1 === pre_type.bgeu) ||
-  //     (tem_brdata2 === pre_type.beqz_bnez)
-
-  // BoringUtils.addSource(decoder1.io.is_br,"is_br_predict")
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")
   BoringUtils.addSource(io.flushVec.orR, "perfCntCondMifuFlush")
 }

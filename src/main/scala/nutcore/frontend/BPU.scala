@@ -54,8 +54,7 @@ class BPUUpdateReq extends NutCoreBundle {
   val actualTaken = Output(Bool())  // for branch
   val fuOpType = Output(FuOpType())
   val btbType = Output(BTBtype())
-  val isRVC = Output(Bool())
-  val instr = Output(UInt(XLEN.W))// for ras, save PC+2 to stack if is RVC
+  val isRVC = Output(Bool()) // for ras, save PC+2 to stack if is RVC
 }
 
 // nextline predicter generates NPC from current NPC in 1 cycle
@@ -278,156 +277,183 @@ class BPU_embedded extends NutCoreModule {
   io.out.rtype := 0.U
 }
 
-// class BPU_inorder extends NutCoreModule {
-//   val io = IO(new Bundle {
-//     val in = new Bundle { val pc = Flipped(Valid((UInt(VAddrBits.W)))) }
-//     val out = new RedirectIO
-//     val flush = Input(Bool())
-//     val brIdx = Output(UInt(3.W))
-//     val crosslineJump = Output(Bool())
-//   })
+class BPU_inorder extends NutCoreModule {
+  val io = IO(new Bundle {
+    val in = new Bundle { val pc = Flipped(Valid((UInt(VAddrBits.W)))) }
+    val out = new RedirectIO
+    val flush = Input(Bool())
+    val brIdx = Output(UInt(3.W))
+    val crosslineJump = Output(Bool())
+    val phtTaken = Output(Bool())
+    // val is_br = Input(Bool())
+  })
 
-//   val flush = BoolStopWatch(io.flush, io.in.pc.valid, startHighPriority = true)
+  val flush = BoolStopWatch(io.flush, io.in.pc.valid, startHighPriority = true)
 
-//   // BTB
-//   val NRbtb = 512
-//   val btbAddr = new TableAddr(log2Up(NRbtb))
-//   def btbEntry() = new Bundle {
-//     val tag = UInt(btbAddr.tagBits.W)
-//     val _type = UInt(2.W)
-//     val target = UInt(VAddrBits.W)
-//     val brIdx = UInt(3.W)
-//     val valid = Bool()
-//   }
+  //ghr
+  val ghr = RegInit(0.U(24.W))
+  val ghr_commit = RegInit(0.U(24.W))
+  // val ghrindex = Cat(ghr(15,12) ^ ghr(6,3),ghr(11,7))
+  // val ghrindex_commit = Cat(ghr_commit(15,12) ^ ghr_commit(6,3),ghr_commit(11,7))
+  // val ghrindex = ghr(11,3)
+  // val ghrindex_commit = ghr_commit(11,3)
 
-//   val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
-//   // flush BTB when executing fence.i
-//   val flushBTB = WireInit(false.B)
-//   val flushTLB = WireInit(false.B)
-//   BoringUtils.addSink(flushBTB, "MOUFlushICache")
-//   BoringUtils.addSink(flushTLB, "MOUFlushTLB")
-//   btb.reset := reset.asBool || (flushBTB || flushTLB)
-//   Debug(reset.asBool || (flushBTB || flushTLB), "[BPU-RESET] bpu-reset flushBTB:%d flushTLB:%d\n", flushBTB, flushTLB)
+  // BTB
+  val NRbtb = 512
+  val NRbht = 2042
+  val btbAddr = new TableAddr(log2Up(NRbtb))
+  def btbEntry() = new Bundle {
+    val tag = UInt(btbAddr.tagBits.W)
+    val _type = UInt(2.W)
+    val target = UInt(VAddrBits.W)
+    val brIdx = UInt(3.W)
+    val valid = Bool()
+  }
 
-//   btb.io.r.req.valid := io.in.pc.valid
-//   btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
+  val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
+  // flush BTB when executing fence.i
+  val flushBTB = WireInit(false.B)
+  val flushTLB = WireInit(false.B)
+  BoringUtils.addSink(flushBTB, "MOUFlushICache")
+  BoringUtils.addSink(flushTLB, "MOUFlushTLB")
+  btb.reset := reset.asBool || (flushBTB || flushTLB)
+  Debug(reset.asBool || (flushBTB || flushTLB), "[BPU-RESET] bpu-reset flushBTB:%d flushTLB:%d\n", flushBTB, flushTLB)
+
+  btb.io.r.req.valid := io.in.pc.valid
+  btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
 
 
-//   val btbRead = Wire(btbEntry())
-//   btbRead := btb.io.r.resp.data(0)
-//   // since there is one cycle latency to read SyncReadMem,
-//   // we should latch the input pc for one cycle
-//   val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
-//   val btbHit = btbRead.valid && btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.fire(), init = false.B) && !(pcLatch(1) && btbRead.brIdx(0))
-//   // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
-//   // !(pcLatch(1) && btbRead.brIdx(0)) is used to deal with the following case:
-//   // -------------------------------------------------
-//   // 0 jump rvc         // marked as "take branch" in BTB
-//   // 2 xxx  rvc <-- pc  // misrecognize this instr as "btb hit" with target of previous jump instr
-//   // -------------------------------------------------
-//   val crosslineJump = btbRead.brIdx(2) && btbHit
-//   io.crosslineJump := crosslineJump
-//   // val crosslineJumpLatch = RegNext(crosslineJump)
-//   // val crosslineJumpTarget = RegEnable(btbRead.target, crosslineJump)
-//   Debug(btbHit, "[BTBHT1] %d pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x type:%x\n", GTimer(), pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush,btbRead._type)
-//   Debug(btbHit, "[BTBHT2] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(crosslineJump, Fill(2, io.out.valid)))
-//   // Debug(btbHit, "[BTBHT5] btbReqValid:%d btbReqSetIdx:%x\n",btb.io.r.req.valid, btb.io.r.req.bits.setId)
-  
-//   // PHT
-//   val pht = Mem(NRbtb, UInt(2.W))
-//   val phtTaken = RegEnable(pht.read(btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
+  val btbRead = Wire(btbEntry())
+  btbRead := btb.io.r.resp.data(0)
+  // since there is one cycle latency to read SyncReadMem,
+  // we should latch the input pc for one cycle
+  val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
+  val btbHit = btbRead.valid && btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.fire(), init = false.B) && !(pcLatch(1) && btbRead.brIdx(0))
+  // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
+  // !(pcLatch(1) && btbRead.brIdx(0)) is used to deal with the following case:
+  // -------------------------------------------------
+  // 0 jump rvc         // marked as "take branch" in BTB
+  // 2 xxx  rvc <-- pc  // misrecognize this instr as "btb hit" with target of previous jump instr
+  // -------------------------------------------------
+  val crosslineJump = btbRead.brIdx(2) && btbHit
+  io.crosslineJump := crosslineJump
+  // val crosslineJumpLatch = RegNext(crosslineJump)
+  // val crosslineJumpTarget = RegEnable(btbRead.target, crosslineJump)
+  Debug(btbHit, "[BTBHT1] %d pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x type:%x\n", GTimer(), pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush,btbRead._type)
+  Debug(btbHit, "[BTBHT2] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(crosslineJump, Fill(2, io.out.valid)))
+  // Debug(btbHit, "[BTBHT5] btbReqValid:%d btbReqSetIdx:%x\n",btb.io.r.req.valid, btb.io.r.req.bits.setId)
 
-//   // RAS
+  // PHT
 
-//   val NRras = 16
-//   val ras = Mem(NRras, UInt(VAddrBits.W))
-//   // val raBrIdxs = Mem(NRras, UInt(2.W))
-//   val sp = Counter(NRras)
-//   val rasTarget = RegEnable(ras.read(sp.value), io.in.pc.valid)
-//   // val rasBrIdx = RegEnable(raBrIdxs.read(sp.value), io.in.pc.valid)
 
-//   // update
-//   val req = WireInit(0.U.asTypeOf(new BPUUpdateReq))
-//   val btbWrite = WireInit(0.U.asTypeOf(btbEntry()))
-//   BoringUtils.addSink(req, "bpuUpdateReq")
+  //  val pht = Mem(NRbtb, UInt(2.W))
+//  val pht = RegInit(VecInit(Seq.fill(NRbht)(2.U(2.W))))
+  val pht = Mem(NRbht, UInt(2.W))
+  val pht_index = ghr(23,12) ^ ghr(11,0) ^ io.in.pc.bits(11,0)
+  val phtTaken = RegEnable(pht(pht_index)(1), io.in.pc.valid)
+  io.phtTaken := phtTaken
 
-//   Debug(req.valid, "[BTBUP] pc=%x tag=%x index=%x bridx=%x tgt=%x type=%x\n", req.pc, btbAddr.getTag(req.pc), btbAddr.getIdx(req.pc), Cat(req.pc(1), ~req.pc(1)), req.actualTarget, req.btbType)
 
-//     //val fflag = req.btbType===3.U && btb.io.w.req.valid && btb.io.w.req.bits.setIdx==="hc9".U
-//     //when(fflag && GTimer()>2888000.U) {
-//     //  Debug("%d\n", GTimer())
-//     //  Debug("[BTBHT6] btbWrite.type is BTBtype.R/RET!!! Inpc:%x btbWrite.brIdx:%x setIdx:%x\n", io.in.pc.bits, btbWrite.brIdx, btb.io.w.req.bits.setIdx)
-//     //  Debug("[BTBHT6] tag:%x target:%x _type:%x bridx:%x\n", btbWrite.tag,btbWrite.target,btbWrite._type,btbWrite.brIdx)
-//     //  Debug(p"[BTBHT6] req:${req} \n")
-//     //} 
-//     //Debug("[BTBHT5] tag: target:%x type:%d brIdx:%d\n", req.actualTarget, req.btbType, Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1)))
+  val NRras = 16
+  val ras = Mem(NRras, UInt(VAddrBits.W))
+  // val raBrIdxs = Mem(NRras, UInt(2.W))
+  val sp = Counter(NRras)
+  val rasTarget = RegEnable(ras.read(sp.value), io.in.pc.valid)
+  // val rasBrIdx = RegEnable(raBrIdxs.read(sp.value), io.in.pc.valid)
 
-//   btbWrite.tag := btbAddr.getTag(req.pc)
-//   btbWrite.target := req.actualTarget
-//   btbWrite._type := req.btbType
-//   btbWrite.brIdx := Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1))
-//   btbWrite.valid := true.B 
-//   // NOTE: We only update BTB at a miss prediction.
-//   // If a miss prediction is found, the pipeline will be flushed
-//   // in the next cycle. Therefore it is safe to use single-port
-//   // SRAM to implement BTB, since write requests have higher priority
-//   // than read request. Again, since the pipeline will be flushed
-//   // in the next cycle, the read request will be useless.
-//   btb.io.w.req.valid := req.isMissPredict && req.valid
-//   btb.io.w.req.bits.setIdx := btbAddr.getIdx(req.pc)
-//   btb.io.w.req.bits.data := btbWrite
+  // update
+  val req = WireInit(0.U.asTypeOf(new BPUUpdateReq))
+  val btbWrite = WireInit(0.U.asTypeOf(btbEntry()))
+  BoringUtils.addSink(req, "bpuUpdateReq")
 
-//   //Debug(true) {
-//     //when (btb.io.w.req.valid && btbWrite.tag === btbAddr.getTag("hffffffff803541a4".U)) {
-//     //  Debug("[BTBWrite] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
-//     //}
-//   //}
+  Debug(req.valid, "[BTBUP] pc=%x tag=%x index=%x bridx=%x tgt=%x type=%x\n", req.pc, btbAddr.getTag(req.pc), btbAddr.getIdx(req.pc), Cat(req.pc(1), ~req.pc(1)), req.actualTarget, req.btbType)
 
-//   //when (GTimer() > 77437484.U && btb.io.w.req.valid) {
-//   //  Debug("[BTBWrite-ALL] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
-//   //}
+  btbWrite.tag := btbAddr.getTag(req.pc)
+  btbWrite.target := req.actualTarget
+  btbWrite._type := req.btbType
+  btbWrite.brIdx := Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1))
+  btbWrite.valid := true.B
 
-//   val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
-//   val reqLatch = RegNext(req)
-//   when (reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
-//     val taken = reqLatch.actualTaken
-//     val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
-//     val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
-//     when (wen) {
-//       pht.write(btbAddr.getIdx(reqLatch.pc), newCnt)
-//       //Debug(){
-//         //Debug("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
-//       //}
-//     }
-//   }
-//   when (req.valid) {
-//     when (req.fuOpType === ALUOpType.call)  {
-//       ras.write(sp.value + 1.U, Mux(req.isRVC, req.pc + 2.U, req.pc + 4.U))
-//       // raBrIdxs.write(sp.value + 1.U, Mux(req.pc(1), 2.U, 1.U))
-//       sp.value := sp.value + 1.U
-//     }
-//     .elsewhen (req.fuOpType === ALUOpType.ret) {
-//       when(sp.value === 0.U) {
-//         //Debug("ATTTTT: sp.value is 0.U\n") //TODO: sp.value may equal to 0.U
-//       }
-//       sp.value := Mux(sp.value===0.U, 0.U, sp.value - 1.U) //TODO: sp.value may less than 0.U
-//     }
-//   }
+  btb.io.w.req.valid := req.isMissPredict && req.valid
+  btb.io.w.req.bits.setIdx := btbAddr.getIdx(req.pc)
+  btb.io.w.req.bits.data := btbWrite
 
-//   io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
-//   // io.out.target := Mux(crosslineJumpLatch && !flush, crosslineJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
-//   // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
-//   io.brIdx  := btbRead.brIdx & Cat(true.B, crosslineJump, Fill(2, io.out.valid))
-//   io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
-//   io.out.rtype := 0.U
-//   // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump || crosslineJumpLatch && !flush && !crosslineJump
-//   // Note: 
-//   // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump : normal branch predict
-//   // crosslineJumpLatch && !flush && !crosslineJump : cross line branch predict, bpu will require imem to fetch the next 16bit of current inst in next instline
-//   // `&& !crosslineJump` is used to make sure this logic will run correctly when imem stalls (pcUpdate === false)
-//   // by using `instline`, we mean a 64 bit instfetch result from imem
-//   // ROCKET uses a 32 bit instline, and its IDU logic is more simple than this implentation.
-// }
+
+  val bht_index_commit = ghr_commit(23,12) ^ ghr_commit(11,0) ^ req.pc(11,0)
+  val cnt = RegNext(pht(bht_index_commit))
+  val reqLatch = RegNext(req)
+  when (reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
+    val taken = reqLatch.actualTaken
+    val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
+    val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
+    when (wen) {
+      //      pht.write(ghr_commit ^ btbAddr.getIdx(reqLatch.pc), newCnt)
+      pht(RegNext(bht_index_commit)) := newCnt
+
+  val is_br = WireInit(false.B)
+  val pre_phtTaken = WireInit(false.B)
+  BoringUtils.addSink(is_br,"is_br_predict")
+  BoringUtils.addSink(pre_phtTaken,"pre_phtTaken")
+  when(io.flush) {
+    ghr := ghr_commit
+  }.elsewhen(is_br) {
+    ghr := Cat(ghr(22,0),pre_phtTaken)
+  }.otherwise {
+    ghr := ghr
+  }
+  //ghr_commit update
+
+  when(reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
+    ghr_commit := Cat(ghr_commit(22,0),reqLatch.actualTaken)
+  }.otherwise {
+    ghr_commit := ghr_commit
+  }
+
+
+  when (req.valid) {
+    when (req.fuOpType === ALUOpType.call)  {
+      ras.write(sp.value + 1.U, Mux(req.isRVC, req.pc + 2.U, req.pc + 4.U))
+      // raBrIdxs.write(sp.value + 1.U, Mux(req.pc(1), 2.U, 1.U))
+      sp.value := sp.value + 1.U
+    }
+      .elsewhen (req.fuOpType === ALUOpType.ret) {
+        when(sp.value === 0.U) {
+          //Debug("ATTTTT: sp.value is 0.U\n") //TODO: sp.value may equal to 0.U
+        }
+        sp.value := Mux(sp.value===0.U, 0.U, sp.value - 1.U) //TODO: sp.value may less than 0.U
+      }
+  }
+  // printf("ghr: %b \n",ghr)
+  // printf("ghr_commit: %b \n",ghr_commit)
+
+  io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
+  // io.out.target := Mux(crosslineJumpLatch && !flush, crosslineJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
+  // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
+  io.brIdx  := btbRead.brIdx & Cat(true.B, crosslineJump, Fill(2, io.out.valid))
+  io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
+  io.out.rtype := 0.U
+  // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump || crosslineJumpLatch && !flush && !crosslineJump
+  // Note:
+  // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump : normal branch predict
+  // crosslineJumpLatch && !flush && !crosslineJump : cross line branch predict, bpu will require imem to fetch the next 16bit of current inst in next instline
+  // `&& !crosslineJump` is used to make sure this logic will run correctly when imem stalls (pcUpdate === false)
+  // by using `instline`, we mean a 64 bit instfetch result from imem
+  // ROCKET uses a 32 bit instline, and its IDU logic is more simple than this implentation.
+
+  // io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
+  // // io.out.target := Mux(crosslineJumpLatch && !flush, crosslineJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
+  // // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
+  // io.brIdx  := btbRead.brIdx & Cat(true.B, crosslineJump, Fill(2, io.out.valid))
+  // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
+  // io.out.rtype := 0.U
+  // // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump || crosslineJumpLatch && !flush && !crosslineJump
+  // // Note:
+  // // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump : normal branch predict
+  // // crosslineJumpLatch && !flush && !crosslineJump : cross line branch predict, bpu will require imem to fetch the next 16bit of current inst in next instline
+  // // `&& !crosslineJump` is used to make sure this logic will run correctly when imem stalls (pcUpdate === false)
+  // // by using `instline`, we mean a 64 bit instfetch result from imem
+  // // ROCKET uses a 32 bit instline, and its IDU logic is more simple than this implentation.
+}
 
 class DummyPredicter extends NutCoreModule {
   val io = IO(new Bundle {
@@ -475,278 +501,3 @@ class BPU_nodelay extends NutCoreModule {
   io.out.rtype := 0.U
 }
 */
-
-class BPU_inorder extends NutCoreModule {
-  val io = IO(new Bundle {
-    val in = new Bundle { val pc = Flipped(Valid((UInt(VAddrBits.W)))) }
-    val out = new RedirectIO
-    val flush = Input(Bool())
-    val brIdx = Output(UInt(3.W))
-    val crosslineJump = Output(Bool())
-    // val is_br = Input(Bool())
-  })
-
-  val flush = BoolStopWatch(io.flush, io.in.pc.valid, startHighPriority = true)
-
-  //ghr
-  val ghr = RegInit(0.U(11.W))
-  val ghr_commit = RegInit(0.U(11.W))
-  // val ghrindex = Cat(ghr(15,12) ^ ghr(6,3),ghr(11,7))
-  // val ghrindex_commit = Cat(ghr_commit(15,12) ^ ghr_commit(6,3),ghr_commit(11,7))
-  // val ghrindex = ghr(11,3)
-  // val ghrindex_commit = ghr_commit(11,3)
-
-  // BTB
-  val NRbtb = 512
-  val btbAddr = new TableAddr(log2Up(NRbtb))
-  def btbEntry() = new Bundle {
-    val tag = UInt(btbAddr.tagBits.W)
-    val _type = UInt(2.W)
-    val target = UInt(VAddrBits.W)
-    val brIdx = UInt(3.W)
-    val valid = Bool()
-  }
-
-  val btb = Module(new SRAMTemplate(btbEntry(), set = NRbtb, shouldReset = true, holdRead = true, singlePort = true))
-  // flush BTB when executing fence.i
-  val flushBTB = WireInit(false.B)
-  val flushTLB = WireInit(false.B)
-  BoringUtils.addSink(flushBTB, "MOUFlushICache")
-  BoringUtils.addSink(flushTLB, "MOUFlushTLB")
-  btb.reset := reset.asBool || (flushBTB || flushTLB)
-  Debug(reset.asBool || (flushBTB || flushTLB), "[BPU-RESET] bpu-reset flushBTB:%d flushTLB:%d\n", flushBTB, flushTLB)
-
-  btb.io.r.req.valid := io.in.pc.valid
-  btb.io.r.req.bits.setIdx := btbAddr.getIdx(io.in.pc.bits)
-
-
-  val btbRead = Wire(btbEntry())
-  btbRead := btb.io.r.resp.data(0)
-  // since there is one cycle latency to read SyncReadMem,
-  // we should latch the input pc for one cycle
-  val pcLatch = RegEnable(io.in.pc.bits, io.in.pc.valid)
-  val btbHit = btbRead.valid && btbRead.tag === btbAddr.getTag(pcLatch) && !flush && RegNext(btb.io.r.req.fire(), init = false.B) && !(pcLatch(1) && btbRead.brIdx(0))
-  // btbHit will ignore pc(1,0). pc(1,0) is used to build brIdx
-  // !(pcLatch(1) && btbRead.brIdx(0)) is used to deal with the following case:
-  // -------------------------------------------------
-  // 0 jump rvc         // marked as "take branch" in BTB
-  // 2 xxx  rvc <-- pc  // misrecognize this instr as "btb hit" with target of previous jump instr
-  // -------------------------------------------------
-  val crosslineJump = btbRead.brIdx(2) && btbHit
-  io.crosslineJump := crosslineJump
-  // val crosslineJumpLatch = RegNext(crosslineJump)
-  // val crosslineJumpTarget = RegEnable(btbRead.target, crosslineJump)
-  Debug(btbHit, "[BTBHT1] %d pc=%x tag=%x,%x index=%x bridx=%x tgt=%x,%x flush %x type:%x\n", GTimer(), pcLatch, btbRead.tag, btbAddr.getTag(pcLatch), btbAddr.getIdx(pcLatch), btbRead.brIdx, btbRead.target, io.out.target, flush,btbRead._type)
-  Debug(btbHit, "[BTBHT2] btbRead.brIdx %x mask %x\n", btbRead.brIdx, Cat(crosslineJump, Fill(2, io.out.valid)))
-  // Debug(btbHit, "[BTBHT5] btbReqValid:%d btbReqSetIdx:%x\n",btb.io.r.req.valid, btb.io.r.req.bits.setId)
-  
-  // PHT
-
-
-//  val pht = Mem(NRbtb, UInt(2.W))
-  val pht = RegInit(VecInit(Seq.fill(2048)(0.U(2.W))))
-  val phtTaken = RegEnable(pht(ghr ^ btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
-  // val phtTaken = RegEnable(pht.read(ghrindex_commit ^ btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
-
-  // val sel = Mem(128,UInt(2.W))
-  // val pre_taken = Mem(NRbtb,UInt(2.W))
-  // val pre_ntake = Mem(NRbtb,UInt(2.W))
-
-  // val sel_index = io.in.pc.bits(10,4)
-  // val pre_index = Cat(ghr(12,9),ghr(8,3)^ghr(20,15))
-
-  // val sel_res = RegEnable(sel.read(sel_index),io.in.pc.valid)
-  // val pre_res = RegEnable((Mux(sel_res(1),pre_taken.read(pre_index)(1),pre_ntake.read(pre_index))),io.in.pc.valid)
-
-  // RAS
-
-  val NRras = 16
-  val ras = Mem(NRras, UInt(VAddrBits.W))
-  // val raBrIdxs = Mem(NRras, UInt(2.W))
-  val sp = Counter(NRras)
-  val rasTarget = RegEnable(ras.read(sp.value), io.in.pc.valid)
-  // val rasBrIdx = RegEnable(raBrIdxs.read(sp.value), io.in.pc.valid)
-
-  // update
-  val req = WireInit(0.U.asTypeOf(new BPUUpdateReq))
-  val btbWrite = WireInit(0.U.asTypeOf(btbEntry()))
-  BoringUtils.addSink(req, "bpuUpdateReq")
-
-  Debug(req.valid, "[BTBUP] pc=%x tag=%x index=%x bridx=%x tgt=%x type=%x\n", req.pc, btbAddr.getTag(req.pc), btbAddr.getIdx(req.pc), Cat(req.pc(1), ~req.pc(1)), req.actualTarget, req.btbType)
-
-    //val fflag = req.btbType===3.U && btb.io.w.req.valid && btb.io.w.req.bits.setIdx==="hc9".U
-    //when(fflag && GTimer()>2888000.U) {
-    //  Debug("%d\n", GTimer())
-    //  Debug("[BTBHT6] btbWrite.type is BTBtype.R/RET!!! Inpc:%x btbWrite.brIdx:%x setIdx:%x\n", io.in.pc.bits, btbWrite.brIdx, btb.io.w.req.bits.setIdx)
-    //  Debug("[BTBHT6] tag:%x target:%x _type:%x bridx:%x\n", btbWrite.tag,btbWrite.target,btbWrite._type,btbWrite.brIdx)
-    //  Debug(p"[BTBHT6] req:${req} \n")
-    //} 
-    //Debug("[BTBHT5] tag: target:%x type:%d brIdx:%d\n", req.actualTarget, req.btbType, Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1)))
-
-  btbWrite.tag := btbAddr.getTag(req.pc)
-  btbWrite.target := req.actualTarget
-  btbWrite._type := req.btbType
-  btbWrite.brIdx := Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1))
-  btbWrite.valid := true.B 
-  // NOTE: We only update BTB at a miss prediction.
-  // If a miss prediction is found, the pipeline will be flushed
-  // in the next cycle. Therefore it is safe to use single-port
-  // SRAM to implement BTB, since write requests have higher priority
-  // than read request. Again, since the pipeline will be flushed
-  // in the next cycle, the read request will be useless.
-  btb.io.w.req.valid := req.isMissPredict && req.valid
-  btb.io.w.req.bits.setIdx := btbAddr.getIdx(req.pc)
-  btb.io.w.req.bits.data := btbWrite
-
-
-  val cnt = RegNext(pht(ghr_commit ^ btbAddr.getIdx(req.pc)))
-  val reqLatch = RegNext(req)
-  when (reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
-    val taken = reqLatch.actualTaken
-    val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
-    val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
-    when (wen) {
-//      pht.write(ghr_commit ^ btbAddr.getIdx(reqLatch.pc), newCnt)
-      pht(ghr_commit ^ btbAddr.getIdx(reqLatch.pc)) := newCnt
-      printf("~~~~~~~~~~~~~~~~\n")
-      printf("commit_pc : %x\n",reqLatch.pc)
-      printf("commit_taken : %x\n",taken)
-      printf("old_cnt : %b\n",cnt)
-      printf("new_cnt : %b\n",newCnt)
-      printf("instr   : %x\n",reqLatch.instr)
-      printf("pht index : %d\n",ghr_commit ^ btbAddr.getIdx(reqLatch.pc))
-      printf("target pc : %x\n",reqLatch.actualTarget)
-      //Debug(){
-        //Debug("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
-      //}
-    }
-  }
-
-  // val cnt = RegNext(pht.read(btbAddr.getIdx(req.pc)))
-  // val reqLatch = RegNext(req)
-  // when (reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
-  //   val taken = reqLatch.actualTaken
-  //   val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
-  //   val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
-  //   when (wen) {
-  //     pht.write(btbAddr.getIdx(reqLatch.pc), newCnt)
-  //     //Debug(){
-  //       //Debug("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
-  //     //}
-  //   }
-  // }
-  //Debug(true) {
-    //when (btb.io.w.req.valid && btbWrite.tag === btbAddr.getTag("hffffffff803541a4".U)) {
-    //  Debug("[BTBWrite] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
-    //}
-  //}
-
-  //when (GTimer() > 77437484.U && btb.io.w.req.valid) {
-  //  Debug("[BTBWrite-ALL] %d setIdx:%x req.valid:%d pc:%x target:%x bridx:%x\n", GTimer(), btbAddr.getIdx(req.pc), req.valid, req.pc, req.actualTarget, btbWrite.brIdx)
-  //}
-  // val cnt_sel_index = sel.read(req.pc(10,4))
-  // val cnt_pre_index = Cat(ghr_commit(12,9),ghr_commit(8,3)^ghr_commit(20,15))
-  // val cur_sel_res = RegNext(sel_res)
-  // val cur_pre_res = RegNext(pre_res)
-  // val cnt = RegNext((Mux(sel_res(1),pre_taken.read(cnt_pre_index)(1),pre_ntake.read(cnt_pre_index)(1))))
-  // val reqLatch = RegNext(req)
-  // when (reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
-  //   val taken = reqLatch.actualTaken
-  //   val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
-  //   val sel_data = Mux(taken, cur_sel_res + 1.U, cur_sel_res - 1.U)
-  //   val pre_data = Mux(taken, cur_pre_res + 1.U, cur_pre_res - 1.U)
-  //   val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
-  //   when (wen) {
-  //     sel.write(cnt_sel_index, sel_data)
-  //     //Debug(){
-  //       //Debug("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
-  //     //}
-  //     when(cur_sel_res(1)) {
-  //       pre_taken.write(cnt_pre_index, pre_data)
-  //     }.elsewhen(cur_sel_res(0)) {
-  //       pre_ntake.write(cnt_pre_index, pre_data)
-  //     }
-  //   }
-  // }
-
-    // ghr update
-  // val is_br = WireInit(false.B)
-  // BoringUtils.addSink(is_br,"is_br_predict")
-
-  // when(io.in.pc.valid && is_br){
-  //   for(i <- 0 until 511){
-  //     printf("pht index : %b\n",pht.read(i.U))
-  //   }
-  //   // printf("index: %b\n",ghrindex ^ btbAddr.getIdx(io.in.pc.bits))
-  //   // printf("pht : %b\n",pht.read(ghrindex ^ btbAddr.getIdx(io.in.pc.bits)))
-  //   printf("pht: %b\n",pht.read(btbAddr.getIdx(io.in.pc.bits)))
-  //   printf("index : %b\n",btbAddr.getIdx(io.in.pc.bits))
-  //   printf("bpu pc : %x\n",io.in.pc.bits)
-  //   printf("phtTaken :%b\n",phtTaken)
-  //   printf("ghr: %b\n",ghr)
-  //   printf("ghrRegNext: %b\n",RegNext(ghr))
-  //   printf("ghr_commit: %b\n",ghr_commit)
-  //   printf("~~~~~~~~~~~~~~~~~~~~~~\n")
-  // }
-  val is_br = WireInit(false.B)
-  BoringUtils.addSink(is_br,"is_br_predict")
-  when(io.flush) {
-    ghr := ghr_commit
-  }.elsewhen(io.in.pc.valid && is_br) {
-    ghr := Cat(ghr(9,0),phtTaken)
-  }.otherwise {
-    ghr := ghr
-  }
-  //ghr_commit update
-
-  when(reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
-    ghr_commit := Cat(ghr_commit(9,0),reqLatch.actualTaken)
-  }.otherwise {
-    ghr_commit := ghr_commit
-  }
-
-
-  when (req.valid) {
-    when (req.fuOpType === ALUOpType.call)  {
-      ras.write(sp.value + 1.U, Mux(req.isRVC, req.pc + 2.U, req.pc + 4.U))
-      // raBrIdxs.write(sp.value + 1.U, Mux(req.pc(1), 2.U, 1.U))
-      sp.value := sp.value + 1.U
-    }
-    .elsewhen (req.fuOpType === ALUOpType.ret) {
-      when(sp.value === 0.U) {
-        //Debug("ATTTTT: sp.value is 0.U\n") //TODO: sp.value may equal to 0.U
-      }
-      sp.value := Mux(sp.value===0.U, 0.U, sp.value - 1.U) //TODO: sp.value may less than 0.U
-    }
-  }
-  // printf("ghr: %b \n",ghr)
-  // printf("ghr_commit: %b \n",ghr_commit)
-
-  io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
-  // io.out.target := Mux(crosslineJumpLatch && !flush, crosslineJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
-  // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
-  io.brIdx  := btbRead.brIdx & Cat(true.B, crosslineJump, Fill(2, io.out.valid))
-  io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
-  io.out.rtype := 0.U
-  // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump || crosslineJumpLatch && !flush && !crosslineJump
-  // Note: 
-  // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump : normal branch predict
-  // crosslineJumpLatch && !flush && !crosslineJump : cross line branch predict, bpu will require imem to fetch the next 16bit of current inst in next instline
-  // `&& !crosslineJump` is used to make sure this logic will run correctly when imem stalls (pcUpdate === false)
-  // by using `instline`, we mean a 64 bit instfetch result from imem
-  // ROCKET uses a 32 bit instline, and its IDU logic is more simple than this implentation.
-
-  // io.out.target := Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target)
-  // // io.out.target := Mux(crosslineJumpLatch && !flush, crosslineJumpTarget, Mux(btbRead._type === BTBtype.R, rasTarget, btbRead.target))
-  // // io.out.brIdx  := btbRead.brIdx & Fill(3, io.out.valid)
-  // io.brIdx  := btbRead.brIdx & Cat(true.B, crosslineJump, Fill(2, io.out.valid))
-  // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
-  // io.out.rtype := 0.U
-  // // io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump || crosslineJumpLatch && !flush && !crosslineJump
-  // // Note: 
-  // // btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B) && !crosslineJump : normal branch predict
-  // // crosslineJumpLatch && !flush && !crosslineJump : cross line branch predict, bpu will require imem to fetch the next 16bit of current inst in next instline
-  // // `&& !crosslineJump` is used to make sure this logic will run correctly when imem stalls (pcUpdate === false)
-  // // by using `instline`, we mean a 64 bit instfetch result from imem
-  // // ROCKET uses a 32 bit instline, and its IDU logic is more simple than this implentation.
-}
