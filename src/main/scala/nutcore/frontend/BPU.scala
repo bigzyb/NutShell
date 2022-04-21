@@ -54,7 +54,8 @@ class BPUUpdateReq extends NutCoreBundle {
   val actualTaken = Output(Bool())  // for branch
   val fuOpType = Output(FuOpType())
   val btbType = Output(BTBtype())
-  val isRVC = Output(Bool()) // for ras, save PC+2 to stack if is RVC
+  val isRVC = Output(Bool())
+  val instr = Output(UInt(XLEN.W))// for ras, save PC+2 to stack if is RVC
 }
 
 // nextline predicter generates NPC from current NPC in 1 cycle
@@ -488,8 +489,8 @@ class BPU_inorder extends NutCoreModule {
   val flush = BoolStopWatch(io.flush, io.in.pc.valid, startHighPriority = true)
 
   //ghr
-  val ghr = RegInit(0.U(9.W))
-  val ghr_commit = RegInit(0.U(9.W))
+  val ghr = RegInit(0.U(11.W))
+  val ghr_commit = RegInit(0.U(11.W))
   // val ghrindex = Cat(ghr(15,12) ^ ghr(6,3),ghr(11,7))
   // val ghrindex_commit = Cat(ghr_commit(15,12) ^ ghr_commit(6,3),ghr_commit(11,7))
   // val ghrindex = ghr(11,3)
@@ -543,7 +544,7 @@ class BPU_inorder extends NutCoreModule {
 
 
 //  val pht = Mem(NRbtb, UInt(2.W))
-  val pht = RegInit(VecInit(Seq.fill(NRbtb)(0.U(2.W))))
+  val pht = RegInit(VecInit(Seq.fill(2048)(0.U(2.W))))
   val phtTaken = RegEnable(pht(ghr ^ btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
   // val phtTaken = RegEnable(pht.read(ghrindex_commit ^ btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
 
@@ -607,6 +608,14 @@ class BPU_inorder extends NutCoreModule {
     when (wen) {
 //      pht.write(ghr_commit ^ btbAddr.getIdx(reqLatch.pc), newCnt)
       pht(ghr_commit ^ btbAddr.getIdx(reqLatch.pc)) := newCnt
+      printf("~~~~~~~~~~~~~~~~\n")
+      printf("commit_pc : %x\n",reqLatch.pc)
+      printf("commit_taken : %x\n",taken)
+      printf("old_cnt : %b\n",cnt)
+      printf("new_cnt : %b\n",newCnt)
+      printf("instr   : %x\n",reqLatch.instr)
+      printf("pht index : %d\n",ghr_commit ^ btbAddr.getIdx(reqLatch.pc))
+      printf("target pc : %x\n",reqLatch.actualTarget)
       //Debug(){
         //Debug("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
       //}
@@ -684,14 +693,14 @@ class BPU_inorder extends NutCoreModule {
   when(io.flush) {
     ghr := ghr_commit
   }.elsewhen(io.in.pc.valid && is_br) {
-    ghr := Cat(ghr(7,0),phtTaken)
+    ghr := Cat(ghr(9,0),phtTaken)
   }.otherwise {
     ghr := ghr
   }
   //ghr_commit update
 
   when(reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
-    ghr_commit := Cat(ghr_commit(7,0),reqLatch.actualTaken)
+    ghr_commit := Cat(ghr_commit(9,0),reqLatch.actualTaken)
   }.otherwise {
     ghr_commit := ghr_commit
   }
