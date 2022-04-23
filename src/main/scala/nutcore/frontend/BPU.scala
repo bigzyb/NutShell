@@ -336,7 +336,21 @@ class BPU_inorder extends NutCoreModule {
   val pht = Mem(NRbtb, UInt(2.W))
   val phtTaken = RegEnable(pht.read(btbAddr.getIdx(io.in.pc.bits))(1), io.in.pc.valid)
 
+<<<<<<< Updated upstream
   // RAS
+=======
+
+  //  val pht = Mem(NRbtb, UInt(2.W))
+  //  val pht = RegInit(VecInit(Seq.fill(NRbht)(2.U(2.W))))
+  //  val pht = Vec(4,RegInit(VecInit(Seq.fill(NRbht)(2.U(2.W)))))
+  val pht = Mem(NRbht, UInt(2.W))
+  val pht_index = ghr(23,12) ^ ghr(11,0) ^ io.in.pc.bits(11,0)
+  val phtTaken = RegEnable(pht.read(pht_index)(1), io.in.pc.valid)
+  //  val phtresult = pht(pht_index(11,10))()
+  //  val phtTaken = RegEnable()
+  io.phtTaken := phtTaken
+
+>>>>>>> Stashed changes
 
   val NRras = 16
   val ras = Mem(NRras, UInt(VAddrBits.W))
@@ -393,10 +407,17 @@ class BPU_inorder extends NutCoreModule {
     val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
     val wen = (taken && (cnt =/= "b11".U)) || (!taken && (cnt =/= "b00".U))
     when (wen) {
+<<<<<<< Updated upstream
       pht.write(btbAddr.getIdx(reqLatch.pc), newCnt)
       //Debug(){
         //Debug("BPUPDATE: pc %x cnt %x\n", reqLatch.pc, newCnt)
       //}
+=======
+      //      pht.write(ghr_commit ^ btbAddr.getIdx(reqLatch.pc), newCnt)
+      //      pht(RegNext(bht_index_commit)) := newCnt
+      pht.write(RegNext(bht_index_commit),newCnt)
+
+>>>>>>> Stashed changes
     }
   }
   when (req.valid) {
