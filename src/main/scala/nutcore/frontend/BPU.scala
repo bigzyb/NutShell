@@ -291,6 +291,9 @@ class BPU_inorder extends NutCoreModule {
   val flush = BoolStopWatch(io.flush, io.in.pc.valid, startHighPriority = true)
 
   //ghr
+//  val ghr = RegInit(0.U(18.W))
+//  val ghr_commit = RegInit(0.U(18.W))
+
   val ghr = RegInit(0.U(24.W))
   val ghr_commit = RegInit(0.U(24.W))
 
@@ -342,12 +345,13 @@ class BPU_inorder extends NutCoreModule {
   // PHT
 
 
-  //  val pht = Mem(NRbtb, UInt(2.W))
-  //  val pht = RegInit(VecInit(Seq.fill(NRbht)(2.U(2.W))))
   val pht = Mem(NRbht, UInt(2.W))
+//  val pht = RegInit(VecInit(Seq.fill(NRbtb)(2.U(2.W))))
+//  val pht = Mem(NRbht, UInt(2.W))
   val pht_index = ghr(23,12) ^ ghr(11,0) ^ io.in.pc.bits(11,0)
+//  val pht_index = ghr(17,9) ^ ghr(8,0) ^ io.in.pc.bits(10,2)
   val phtTaken = RegEnable(pht(pht_index)(1), io.in.pc.valid)
-  io.phtTaken := phtTaken
+
 
 
   val NRras = 16
@@ -376,8 +380,10 @@ class BPU_inorder extends NutCoreModule {
 
 
   val bht_index_commit = ghr_commit(23,12) ^ ghr_commit(11,0) ^ req.pc(11,0)
+//  val bht_index_commit = ghr_commit(17,9) ^ ghr_commit(8,0) ^ req.pc(10,2)
   val cnt = RegNext(pht(bht_index_commit))
   val reqLatch = RegNext(req)
+  val ena = reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)
   when (reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
     val taken = reqLatch.actualTaken
     val newCnt = Mux(taken, cnt + 1.U, cnt - 1.U)
@@ -392,11 +398,17 @@ class BPU_inorder extends NutCoreModule {
 
   val is_br = WireInit(false.B)
   val pre_phtTaken = WireInit(false.B)
+  val pre_pc    = WireInit(0.U(VAddrBits.W))
+
   BoringUtils.addSink(is_br,"is_br_predict")
   BoringUtils.addSink(pre_phtTaken,"pre_phtTaken")
+  BoringUtils.addSink(pre_pc,"pre_pc")
+  val pht_pre_index = ghr(17,9) ^ ghr(8,0) ^ pre_pc(10,2)
+  val phtTaken_pre = pht(pht_pre_index)(1)
   when(io.flush) {
     ghr := ghr_commit
   }.elsewhen(is_br) {
+//    ghr := Cat(ghr(16,0),pre_phtTaken)
     ghr := Cat(ghr(22,0),pre_phtTaken)
   }.otherwise {
     ghr := ghr
@@ -404,6 +416,7 @@ class BPU_inorder extends NutCoreModule {
   //ghr_commit update
 
   when(reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
+//    ghr_commit := Cat(ghr_commit(16,0),reqLatch.actualTaken)
     ghr_commit := Cat(ghr_commit(22,0),reqLatch.actualTaken)
   }.otherwise {
     ghr_commit := ghr_commit
@@ -429,7 +442,7 @@ class BPU_inorder extends NutCoreModule {
   io.brIdx  := btbRead.brIdx & Cat(true.B, crosslineJump, Fill(2, io.out.valid))
   io.out.valid := btbHit && Mux(btbRead._type === BTBtype.B, phtTaken, true.B && rasTarget=/=0.U) //TODO: add rasTarget=/=0.U, need fix
   io.out.rtype := 0.U
-
+  io.phtTaken := phtTaken
 }
 
 class DummyPredicter extends NutCoreModule {

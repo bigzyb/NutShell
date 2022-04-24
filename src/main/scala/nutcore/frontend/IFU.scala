@@ -389,7 +389,8 @@ class IFU_inorder extends NutCoreModule with HasResetVector {
   }
   io.out.bits.exceptionVec(instrPageFault) := io.ipf
   io.out.valid := io.imem.resp.valid && !io.flushVec(0)
-
+  io.out.bits.phtTaken := bp1.io.phtTaken
+  io.out.bits.bpupc    := bp1.io.in.pc.bits
   BoringUtils.addSource(BoolStopWatch(io.imem.req.valid, io.imem.resp.fire()), "perfCntCondMimemStall")
   BoringUtils.addSource(io.flushVec.orR, "perfCntCondMifuFlush")
 }

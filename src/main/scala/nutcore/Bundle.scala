@@ -67,6 +67,7 @@ class CtrlFlowIO extends NutCoreBundle {
   val runahead_checkpoint_id = Output(UInt(64.W))
   val isBranch = Output(Bool())
   val phtTaken = Output(Bool())
+  val bpupc    = Output(UInt(VAddrBits.W))
 }
 
 class DecodeIO extends NutCoreBundle {

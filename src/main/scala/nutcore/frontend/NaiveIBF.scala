@@ -118,7 +118,7 @@ class NaiveRVCAlignBuffer extends NutCoreModule with HasInstrType with HasExcept
   
   BoringUtils.addSource(io.is_br,"is_br_predict")
   BoringUtils.addSource(io.in.bits.phtTaken,"pre_phtTaken")
-
+  BoringUtils.addSource(io.in.bits.pc,"pre_pc")
 
   when(!io.flush){
     switch(state){
