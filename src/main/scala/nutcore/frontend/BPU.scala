@@ -294,12 +294,13 @@ class BPU_inorder extends NutCoreModule {
 //  val ghr = RegInit(0.U(18.W))
 //  val ghr_commit = RegInit(0.U(18.W))
 
-  val ghr = RegInit(0.U(24.W))
-  val ghr_commit = RegInit(0.U(24.W))
+  val ghr = RegInit(0.U(22.W))
+  val ghr_commit = RegInit(0.U(22.W))
+
 
   // BTB
   val NRbtb = 512
-  val NRbht = 2042
+  val NRbht = 2048
   val btbAddr = new TableAddr(log2Up(NRbtb))
   def btbEntry() = new Bundle {
     val tag = UInt(btbAddr.tagBits.W)
@@ -348,8 +349,8 @@ class BPU_inorder extends NutCoreModule {
   val pht = Mem(NRbht, UInt(2.W))
 //  val pht = RegInit(VecInit(Seq.fill(NRbtb)(2.U(2.W))))
 //  val pht = Mem(NRbht, UInt(2.W))
-  val pht_index = ghr(23,12) ^ ghr(11,0) ^ io.in.pc.bits(11,0)
-//  val pht_index = ghr(17,9) ^ ghr(8,0) ^ io.in.pc.bits(10,2)
+//  val pht_index = ghr(21,11) ^ ghr(10,0) ^ io.in.pc.bits(12,2)
+  val pht_index = io.in.pc.bits(12,2)
   val phtTaken = RegEnable(pht(pht_index)(1), io.in.pc.valid)
 
 
@@ -379,8 +380,9 @@ class BPU_inorder extends NutCoreModule {
   btb.io.w.req.bits.data := btbWrite
 
 
-  val bht_index_commit = ghr_commit(23,12) ^ ghr_commit(11,0) ^ req.pc(11,0)
-//  val bht_index_commit = ghr_commit(17,9) ^ ghr_commit(8,0) ^ req.pc(10,2)
+//  val bht_index_commit = ghr_commit(21,11) ^ ghr_commit(10,0) ^ req.pc(12,2)
+  val bht_index_commit = req.pc(12,2)
+  //  val bht_index_commit = ghr_commit(17,9) ^ ghr_commit(8,0) ^ req.pc(10,2)
   val cnt = RegNext(pht(bht_index_commit))
   val reqLatch = RegNext(req)
   val ena = reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)
@@ -403,21 +405,21 @@ class BPU_inorder extends NutCoreModule {
   BoringUtils.addSink(is_br,"is_br_predict")
   BoringUtils.addSink(pre_phtTaken,"pre_phtTaken")
   BoringUtils.addSink(pre_pc,"pre_pc")
-  val pht_pre_index = ghr(17,9) ^ ghr(8,0) ^ pre_pc(10,2)
+  val pht_pre_index = ghr(21,11) ^ ghr(10,0) ^ pre_pc(12,2)
   val phtTaken_pre = pht(pht_pre_index)(1)
   when(io.flush) {
     ghr := ghr_commit
   }.elsewhen(is_br) {
 //    ghr := Cat(ghr(16,0),pre_phtTaken)
-    ghr := Cat(ghr(22,0),pre_phtTaken)
+    ghr := Cat(ghr(20,0),pre_phtTaken)
   }.otherwise {
     ghr := ghr
   }
   //ghr_commit update
 
-  when(reqLatch.valid && ALUOpType.isBranch(reqLatch.fuOpType)) {
+  when(req.valid && ALUOpType.isBranch(req.fuOpType)) {
 //    ghr_commit := Cat(ghr_commit(16,0),reqLatch.actualTaken)
-    ghr_commit := Cat(ghr_commit(22,0),reqLatch.actualTaken)
+    ghr_commit := Cat(ghr_commit(20,0),req.actualTaken)
   }.otherwise {
     ghr_commit := ghr_commit
   }
