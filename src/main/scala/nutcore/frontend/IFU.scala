@@ -132,6 +132,7 @@ class IFU_ooo extends NutCoreModule with HasResetVector {
   npcInstValid := Mux(crosslineJump && !(state === s_crosslineJump) && !io.redirect.valid, "b0001".U, genInstValid(npc))
 
   // branch position index, 4 bit vector
+
   // e.g. brIdx 0010 means a branch is predicted/assigned at pc (offset 2)
   val brIdx = Wire(UInt(4.W))
   // predicted branch position index, 4 bit vector

@@ -299,7 +299,7 @@ class BPU_inorder extends NutCoreModule {
 
   // BTB
   val NRbtb = 512
-  val NRbht = 2042
+  val NRbht = 4096
   val btbAddr = new TableAddr(log2Up(NRbtb))
   def btbEntry() = new Bundle {
     val tag = UInt(btbAddr.tagBits.W)
@@ -348,7 +348,7 @@ class BPU_inorder extends NutCoreModule {
   val pht = Mem(NRbht, UInt(2.W))
 //  val pht = RegInit(VecInit(Seq.fill(NRbtb)(2.U(2.W))))
 //  val pht = Mem(NRbht, UInt(2.W))
-  val pht_index = ghr(23,12) ^ ghr(11,0) ^ io.in.pc.bits(11,0)
+  val pht_index = ghr(23,12) ^ ghr(11,0) ^ io.in.pc.bits(13,2)
 //  val pht_index = ghr(17,9) ^ ghr(8,0) ^ io.in.pc.bits(10,2)
   val phtTaken = RegEnable(pht(pht_index)(1), io.in.pc.valid)
 
@@ -370,8 +370,8 @@ class BPU_inorder extends NutCoreModule {
 
   btbWrite.tag := btbAddr.getTag(req.pc)
   btbWrite.target := req.actualTarget
-  btbWrite._type := req.btbType
-  btbWrite.brIdx := Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1))
+  btbWrite._type := req.btbType // 000 010 100 110 000
+  btbWrite.brIdx := Cat(req.pc(2,0)==="h6".U && !req.isRVC, req.pc(1), ~req.pc(1)) //110
   btbWrite.valid := true.B
 
   btb.io.w.req.valid := req.isMissPredict && req.valid
@@ -379,7 +379,7 @@ class BPU_inorder extends NutCoreModule {
   btb.io.w.req.bits.data := btbWrite
 
 
-  val bht_index_commit = ghr_commit(23,12) ^ ghr_commit(11,0) ^ req.pc(11,0)
+  val bht_index_commit = ghr_commit(23,12) ^ ghr_commit(11,0) ^ req.pc(13,2)
 //  val bht_index_commit = ghr_commit(17,9) ^ ghr_commit(8,0) ^ req.pc(10,2)
   val cnt = RegNext(pht(bht_index_commit))
   val reqLatch = RegNext(req)
@@ -403,7 +403,7 @@ class BPU_inorder extends NutCoreModule {
   BoringUtils.addSink(is_br,"is_br_predict")
   BoringUtils.addSink(pre_phtTaken,"pre_phtTaken")
   BoringUtils.addSink(pre_pc,"pre_pc")
-  val pht_pre_index = ghr(17,9) ^ ghr(8,0) ^ pre_pc(10,2)
+  val pht_pre_index = ghr(23,12) ^ ghr(11,0) ^ pre_pc(13,2)
   val phtTaken_pre = pht(pht_pre_index)(1)
   when(io.flush) {
     ghr := ghr_commit
